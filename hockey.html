@@ -56,7 +56,7 @@
   </div>
 </div>
 <canvas id="rink"></canvas>
-<div id="message">マウスを動かしてプレイ — 先に 7 点取った方が勝ち！</div>
+<div id="message">マウス or 矢印キーで操作 — 先に 7 点取った方が勝ち！</div>
 
 <script>
 const canvas = document.getElementById('rink');
@@ -90,21 +90,53 @@ const puck = { x: W / 2, y: H / 2, vx: 0, vy: 0 };
 
 let mouseX = player.x;
 let mouseY = player.y;
+let inputMode = 'mouse'; // 'mouse' or 'keyboard'
+
+// --- Keyboard input state ---
+const keys = { up: false, down: false, left: false, right: false };
+const KEYBOARD_ACCEL = 0.8;    // acceleration per frame
+const KEYBOARD_FRICTION = 0.92; // velocity decay per frame
+const KEYBOARD_MAX_SPEED = 8;  // max speed in pixels/frame
+let keyVX = 0;
+let keyVY = 0;
 
 // --- Input ---
 canvas.addEventListener('mousemove', e => {
+  inputMode = 'mouse';
   const rect = canvas.getBoundingClientRect();
   mouseX = (e.clientX - rect.left) * (W / rect.width);
   mouseY = (e.clientY - rect.top) * (H / rect.height);
 });
 
 canvas.addEventListener('touchmove', e => {
+  inputMode = 'mouse';
   e.preventDefault();
   const rect = canvas.getBoundingClientRect();
   const touch = e.touches[0];
   mouseX = (touch.clientX - rect.left) * (W / rect.width);
   mouseY = (touch.clientY - rect.top) * (H / rect.height);
 }, { passive: false });
+
+document.addEventListener('keydown', e => {
+  switch (e.key) {
+    case 'ArrowUp':    keys.up = true; e.preventDefault(); break;
+    case 'ArrowDown':  keys.down = true; e.preventDefault(); break;
+    case 'ArrowLeft':  keys.left = true; e.preventDefault(); break;
+    case 'ArrowRight': keys.right = true; e.preventDefault(); break;
+  }
+  if (keys.up || keys.down || keys.left || keys.right) {
+    inputMode = 'keyboard';
+  }
+});
+
+document.addEventListener('keyup', e => {
+  switch (e.key) {
+    case 'ArrowUp':    keys.up = false; break;
+    case 'ArrowDown':  keys.down = false; break;
+    case 'ArrowLeft':  keys.left = false; break;
+    case 'ArrowRight': keys.right = false; break;
+  }
+});
 
 canvas.addEventListener('click', () => {
   if (gameOver) {
@@ -113,7 +145,9 @@ canvas.addEventListener('click', () => {
     gameOver = false;
     goalFlashTimer = 0;
     goalScoredBy = null;
-    document.getElementById('message').textContent = 'マウスを動かしてプレイ — 先に 7 点取った方が勝ち！';
+    keyVX = 0;
+    keyVY = 0;
+    document.getElementById('message').textContent = 'マウス or 矢印キーで操作 — 先に 7 点取った方が勝ち！';
     resetPuck();
   }
 });
@@ -127,6 +161,8 @@ function resetPuck() {
   player.y = H / 2;
   cpu.x = W - 120;
   cpu.y = H / 2;
+  keyVX = 0;
+  keyVY = 0;
 }
 
 // --- Collision helpers ---
@@ -201,10 +237,37 @@ function update() {
   // Player paddle
   player.prevX = player.x;
   player.prevY = player.y;
-  let px = clamp(mouseX, PADDLE_R, W / 2 - PADDLE_R);
-  let py = clamp(mouseY, PADDLE_R, H - PADDLE_R);
-  player.x = px;
-  player.y = py;
+
+  if (inputMode === 'keyboard') {
+    // Acceleration from key presses
+    if (keys.left)  keyVX -= KEYBOARD_ACCEL;
+    if (keys.right) keyVX += KEYBOARD_ACCEL;
+    if (keys.up)    keyVY -= KEYBOARD_ACCEL;
+    if (keys.down)  keyVY += KEYBOARD_ACCEL;
+
+    // Apply friction (inertia — paddle keeps sliding when keys released)
+    keyVX *= KEYBOARD_FRICTION;
+    keyVY *= KEYBOARD_FRICTION;
+
+    // Clamp speed
+    const keySpeed = Math.sqrt(keyVX * keyVX + keyVY * keyVY);
+    if (keySpeed > KEYBOARD_MAX_SPEED) {
+      keyVX = (keyVX / keySpeed) * KEYBOARD_MAX_SPEED;
+      keyVY = (keyVY / keySpeed) * KEYBOARD_MAX_SPEED;
+    }
+
+    // Stop drifting when speed is negligible
+    if (Math.abs(keyVX) < 0.1) keyVX = 0;
+    if (Math.abs(keyVY) < 0.1) keyVY = 0;
+
+    player.x = clamp(player.x + keyVX, PADDLE_R, W / 2 - PADDLE_R);
+    player.y = clamp(player.y + keyVY, PADDLE_R, H - PADDLE_R);
+  } else {
+    // Mouse / touch — direct position tracking
+    player.x = clamp(mouseX, PADDLE_R, W / 2 - PADDLE_R);
+    player.y = clamp(mouseY, PADDLE_R, H - PADDLE_R);
+  }
+
   player.vx = player.x - player.prevX;
   player.vy = player.y - player.prevY;
 
